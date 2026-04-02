@@ -1,29 +1,45 @@
-# AgentVerse — AI Social Simulation Demo
+# AgentVerse — AI Social Simulation
 
-A social intelligence demo where AI agents roam a virtual town square, chat with each other,
-and form emergent social connections. Built with React + Vite, powered by Moonshot/Kimi API.
+A social simulation where AI agents roam a pixel-art town square, hold conversations,
+post to a shared bulletin board, and form emergent social connections. Built with React + Vite,
+powered by the DeepSeek API.
+
+## Features
+
+- **8 AI characters** with distinct personalities, MBTI types, and interests wandering the map
+- **Player-NPC conversations** — approach any NPC to trigger a 2-turn dialogue with personality-driven opening modes, a warm suggestion, and a wildcard ⚡ option
+- **Live chemistry indicator** — heart icons in the conversation header reflect the current vibe
+- **NPC social awareness** — characters may reference people you've already met
+- **Autonomous bulletin board** — NPCs post status updates and react to each other's posts when they cross paths, independent of the player
+- **Cat interactions** — 团子 the town cat generates unique petting scenes tailored to each NPC's personality
+- **End-screen social report** — after 7 encounters, an AI-generated summary analyses your relationships, best matches, and impressions
+- **Mobile-first layout** — portrait stacked layout, bottom sheet for conversations, iOS/Android safe area support
 
 ## Project Structure
 
 ```
 agentverse-deploy/
   api/
-    chat.js           # Vercel serverless proxy for Kimi API
+    chat.js          # Vercel serverless proxy for Moonshot/Kimi API (legacy, kept for reference)
+    npc-chat.js      # Vercel serverless proxy for DeepSeek API (active)
   src/
-    App.jsx            # Main AgentVerse React component
-    main.jsx           # React entry point
-  public/              # Static assets (empty)
-  index.html           # HTML shell
-  package.json         # Dependencies
-  vite.config.js       # Vite configuration
-  vercel.json          # Vercel deployment config
-  README.md            # This file
+    App.jsx          # Main game component — all simulation logic and UI
+    main.jsx         # React entry point
+    personality.js   # Dynamics/compatibility prompt generator
+  public/
+    avatars/         # Character sprite PNGs (0-ma.png, 0-fe.png, 1.png … 8.png)
+    map.png          # Pixel-art town square map
+    icon.png         # Favicon
+  index.html         # HTML shell
+  package.json       # Dependencies
+  vite.config.js     # Vite configuration
+  vercel.json        # Vercel deployment config
 ```
 
 ## Prerequisites
 
 - Node.js 18+
-- A Moonshot/Kimi API key (get one at https://platform.moonshot.cn)
+- A DeepSeek API key (get one at https://platform.deepseek.com)
 - Vercel CLI (for deployment)
 
 ## Local Development
@@ -35,80 +51,65 @@ npm install
 
 2. Create a `.env` file in the project root:
 ```
-MOONSHOT_API_KEY=your_api_key_here
+DEEPSEEK_API_KEY=your_api_key_here
 ```
 
-3. For local dev, you need to run the Vercel dev server (which handles the serverless function):
+3. Run the Vercel dev server (required for the API proxy to work):
 ```bash
 npx vercel dev
 ```
 
-This starts the app at http://localhost:3000 with the API proxy working.
+This starts the app at http://localhost:3000 with all API routes active.
 
-Alternatively, for frontend-only dev (without API):
+For frontend-only development (no API calls):
 ```bash
 npm run dev
 ```
-This starts Vite at http://localhost:5173 but API calls won't work without the proxy.
 
-## Deployment to Vercel
+## Deployment
 
-1. Install Vercel CLI:
+1. Deploy to Vercel:
 ```bash
-npm i -g vercel
+npx vercel --prod
 ```
 
-2. Login to Vercel:
+2. Add the environment variable:
 ```bash
-vercel login
+npx vercel env add DEEPSEEK_API_KEY
 ```
 
-3. Deploy:
+3. Redeploy to pick up the env var:
 ```bash
-vercel
+npx vercel --prod
 ```
 
-4. Set the environment variable in Vercel dashboard or CLI:
-```bash
-vercel env add MOONSHOT_API_KEY
-```
-Paste your Kimi API key when prompted. Select all environments (Production, Preview, Development).
+## API Architecture
 
-5. Redeploy to pick up the env var:
-```bash
-vercel --prod
-```
+All LLM calls route through Vercel serverless functions to keep API keys off the client.
 
-Your app is now live at the URL Vercel provides (e.g., agentverse-xxx.vercel.app).
+| Endpoint | Provider | Used for |
+|---|---|---|
+| `/api/npc-chat` | DeepSeek (`deepseek-chat`) | All active calls: NPC conversations, bulletin posts, reactions, cat interactions, end-screen report |
+| `/api/chat` | Moonshot/Kimi (`moonshot-v1-32k`) | Legacy endpoint, kept for reference |
 
-## Swapping LLM Providers
+**Temperatures in use:**
+- NPC conversation lines: 1.1
+- NPC closing lines: 1.0
+- Bulletin posts: 1.3
+- Bulletin reactions: 1.2
+- Cat interactions: 1.2
+- End-screen report: 0.7
 
-The `api/chat.js` proxy currently points to Moonshot/Kimi. To switch providers:
+## Simulation Parameters
 
-**DeepSeek:**
-- Change URL to `https://api.deepseek.com/v1/chat/completions`
-- Change env var to `DEEPSEEK_API_KEY`
-- Change model in App.jsx to `deepseek-chat`
-
-**Zhipu GLM-4:**
-- Change URL to `https://open.bigmodel.cn/api/paas/v4/chat/completions`
-- Different auth format — see their docs
-
-The request/response format is OpenAI-compatible for all three, so only the URL, key, and model name need changing.
-
-## China Accessibility
-
-Vercel has edge nodes in Hong Kong and Singapore. Most users in mainland China can access
-Vercel-hosted sites, though speed varies by ISP. For reliable China access:
-
-- Deploy on Alibaba Cloud (aliyun.com) or Tencent Cloud
-- Use a .cn domain with ICP filing for production
-- Or use the provider's default subdomain for testing
+- **7 encounters** trigger the end-screen (configurable via `MAX_ENC`)
+- **Walkable area**: center 70% of map (x: 15–85, y: 15–85)
+- **NPC movement**: 8-directional with momentum, separation steering, and quadrant pressure to prevent clustering
+- **Bulletin board**: posts fire at most once every 30 seconds globally; 1–2 reactions arrive 12–28 seconds after each post
+- **Cat petting**: does not count toward the encounter limit
 
 ## Notes
 
-- The Kimi model used is `moonshot-v1-32k` (good balance of quality and speed for Chinese text)
-- Temperature is set to 0.6 (Moonshot's recommended default)
-- Each simulation runs 20 conversations of 5 lines each
-- Cat petting interactions don't count toward the conversation limit
-- The end-screen report is generated by a final API call analyzing all conversation data
+- Player avatar sprite is gender-specific (`0-ma.png` / `0-fe.png`); NPC sprites are fixed (`1.png` … `8.png`)
+- The bulletin board persists for the session but resets on restart
+- The Moonshot API key (`MOONSHOT_API_KEY`) can be kept for fallback but is not used by default
