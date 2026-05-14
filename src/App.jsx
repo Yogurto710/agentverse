@@ -756,11 +756,16 @@ export default function AgentVerse() {
     var histStr = exchanges.map(function(e) { return e.speaker + ": " + e.text; }).join("\n");
     var jsonFmt = "{\"line\": \"" + npc.name + "说的话（25-40字）\", \"warm\": \"" + player.name + "温暖积极的回应\", \"cold\": \"" + player.name + "冷淡保守的回应\", \"wild\": \"" + player.name + "出人意料的回应（搞笑/反问/岔话题/犀利观点）\", \"vibe\": <1-5，当前对话气场分>}";
     var awareness = getAwarenessContext(npc);
+    var feed = bulletinR.current || [];
+    var topPost = feed.find(function(p) { return p.author && p.author.id !== npc.id; });
+    var hook = topPost
+      ? "\n\n【本次对话的社交锚点】" + topPost.author.name + "刚在广场动态上发了：「" + topPost.content + "」。把这条动态当作开场或谈资织进对话——可以评论、八卦、追问、借此换话题、或主动提到" + topPost.author.name + "。这能让对话有共同话题，不要每次都只谈自己的兴趣。"
+      : "";
     fetchWithRetry({
       model: "deepseek-v4-flash", temperature: 1.1,
       messages: [
-        { role: "system", content: "你扮演" + npc.name + "。你正在和" + player.name + "说话。你只能生成" + npc.name + "的台词，绝对不能生成" + player.name + "的台词。根据性格指导说话：\n" + dynamicsPrompt + "\n\n每条消息25-40字，口语化中文，语气贴合当前开场方式。如果「你最近的认知」里提到了认识的人或最近的动态，可以自然地八卦/提及，让对话有社交温度（但别每次都提）。\n必须输出且仅输出JSON（不要任何其他文字）:\n" + jsonFmt },
-        { role: "user", content: isOpening ? (desc(npc) + awareness + "\n\n你是" + npc.name + "，生成对" + player.name + "的开场白，并提供三种" + player.name + "可能的回应建议。") : (desc(npc) + awareness + "\n\n对话历史:\n" + histStr + "\n\n你是" + npc.name + "，生成你的回复，并提供三种" + player.name + "可能的回应建议（包括一个出人意料的wild选项）。") }
+        { role: "system", content: "你扮演" + npc.name + "。你正在和" + player.name + "说话。你只能生成" + npc.name + "的台词，绝对不能生成" + player.name + "的台词。根据性格指导说话：\n" + dynamicsPrompt + "\n\n每条消息25-40字，口语化中文，语气贴合当前开场方式。\n\n【社交编织规则】这是一个有共同社交圈的小广场。如果系统提供了「社交锚点」（最近的动态）或「社交背景」（认识的人、自己发过的帖），请把它当成对话的一部分——评论、八卦、接话、追问都很自然。避免每次都只聊自己的兴趣，让对话有共同话题感。\n\n必须输出且仅输出JSON（不要任何其他文字）:\n" + jsonFmt },
+        { role: "user", content: isOpening ? (desc(npc) + awareness + hook + "\n\n你是" + npc.name + "，生成对" + player.name + "的开场白，并提供三种" + player.name + "可能的回应建议。") : (desc(npc) + awareness + hook + "\n\n对话历史:\n" + histStr + "\n\n你是" + npc.name + "，生成你的回复，并提供三种" + player.name + "可能的回应建议（包括一个出人意料的wild选项）。") }
       ]
     }, 1, function(d) {
       var raw = d.choices[0].message.content;
@@ -845,15 +850,14 @@ export default function AgentVerse() {
   }
 
   // Builds a compact "what this NPC currently knows about the world" block.
-  // Injected into every LLM call so NPCs can reference their own posts, gossip
-  // about NPCs they've met, and riff on what's happening on the bulletin board.
+  // Data-only — surfaces supply their own directives about how to use it.
   function getAwarenessContext(npc) {
     if (!npc || npc.isUser || npc.isCat) return "";
     var lines = [];
     var now = Date.now();
 
     if (npc._lastPost && npc._lastPost.content) {
-      lines.push("你最近发过：「" + npc._lastPost.content + "」");
+      lines.push("- 你最近发过：「" + npc._lastPost.content + "」");
     }
 
     if (npc._metNpcs) {
@@ -865,7 +869,7 @@ export default function AgentVerse() {
         return other.name + "（" + fresh + "碰过" + rec.count + "次）";
       }).filter(Boolean);
       if (known.length > 0) {
-        lines.push("你认识的人：" + known.join("、"));
+        lines.push("- 你认识的人：" + known.join("、"));
       }
     }
 
@@ -875,11 +879,26 @@ export default function AgentVerse() {
       var summary = recent.map(function(p) {
         return p.author.name + "刚发过「" + p.content + "」";
       }).join("；");
-      lines.push("广场最近的动态：" + summary);
+      lines.push("- 广场最近的动态：" + summary);
     }
 
     if (lines.length === 0) return "";
-    return "\n\n你最近的认知（可在发言中自然提及，但不必每次都提）：\n" + lines.join("\n");
+    return "\n\n【你最近的社交背景】\n" + lines.join("\n");
+  }
+
+  // Bulletin post mode picker: when this NPC has memory of others, biases ~40%
+  // toward gossiping about a specific known NPC, otherwise rolls a standard style.
+  function pickPostMode(poster) {
+    var STANDARD = ["吐槽日常", "分享兴趣冷知识", "发表争议性观点", "碎碎念", "讲一个冷笑话", "对某件事的真实感受"];
+    var metIds = poster._metNpcs ? Object.keys(poster._metNpcs) : [];
+    if (metIds.length > 0 && Math.random() < 0.4) {
+      var pickId = metIds[Math.floor(Math.random() * metIds.length)];
+      var target = (agR.current || []).find(function(a) { return String(a.id) === pickId; });
+      if (target) {
+        return { mode: "gossip", target: target, rec: poster._metNpcs[pickId] };
+      }
+    }
+    return { mode: STANDARD[Math.floor(Math.random() * STANDARD.length)] };
   }
 
   function doConv(a1, a2) {
@@ -994,6 +1013,19 @@ export default function AgentVerse() {
     // Brief pause only — NPCs resume walking regardless of API response
     setTimeout(function() { poster._frozen = false; other._frozen = false; }, 2500);
 
+    var picked = pickPostMode(poster);
+    var awareness = getAwarenessContext(poster);
+    var personaBlock = poster.name + "（" + poster.mbti + "，" + poster.zodiac + "）\n简介：" + poster.bio + "\n兴趣：" + poster.interests.join("、");
+
+    var systemContent, userContent;
+    if (picked.mode === "gossip") {
+      systemContent = "你在扮演一个广场居民，在社交网络上发帖。本次发帖以你认识的另一位居民为主角——可以是亲切吐槽、点评、好奇、反差吐槽、记录有趣观察，但不要恶意。语气完全贴合角色性格，口语化，不要开头说「我」，不要用「作为XX」句式。可以直接喊出对方名字。输出纯JSON：{\"post\":\"内容（25-45字）\"}";
+      userContent = personaBlock + awareness + "\n\n本次发帖的主角是 " + picked.target.name + "（你和TA碰过" + picked.rec.count + "次）。以" + poster.name + "的口吻，发一条围绕" + picked.target.name + "的动态。";
+    } else {
+      systemContent = "你在扮演一个广场居民，在社交网络上发帖。本次发帖风格：" + picked.mode + "。语气完全贴合角色性格，口语化，不要开头说「我」，不要用「作为XX」句式。如果「最近的社交背景」里有相关的人或动态，自然地织进帖子里更好。输出纯JSON：{\"post\":\"内容（25-45字）\"}";
+      userContent = personaBlock + awareness + "\n\n刚在广场碰到了" + other.name + "。以" + poster.name + "的口吻，按上述风格发一条动态。";
+    }
+
     fetch("/api/npc-chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1001,8 +1033,8 @@ export default function AgentVerse() {
         model: "deepseek-v4-flash",
         temperature: 1.3,
         messages: [
-          { role: "system", content: "你在扮演一个有鲜明个性的广场居民，在社交网络上发帖。每次发帖风格要不同，从以下随机选一种：吐槽日常、分享兴趣冷知识、发表争议性观点、碎碎念、讲一个冷笑话、对某件事的真实感受、偶遇感想（仅偶尔用）、八卦/点评认识的人（基于「你认识的人」中的记录，可以亲切吐槽、好奇、或反差吐槽）。语气完全贴合角色性格，口语化，不要开头说「我」，不要用「作为XX」句式。输出纯JSON：{\"post\":\"内容（25-45字）\"}" },
-          { role: "user", content: poster.name + "（" + poster.mbti + "，" + poster.zodiac + "）\n简介：" + poster.bio + "\n兴趣：" + poster.interests.join("、") + getAwarenessContext(poster) + "\n\n刚在广场碰到了" + other.name + "。以" + poster.name + "的口吻发一条动态。" }
+          { role: "system", content: systemContent },
+          { role: "user", content: userContent }
         ]
       })
     })
