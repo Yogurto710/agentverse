@@ -92,11 +92,11 @@ zodiac, and gender on the intro screen.
 
 | Feature | Temperature |
 |---|---|
-| NPC conversation lines | 1.1 |
-| NPC closing lines | 1.0 |
-| Bulletin posts | 1.3 |
-| Bulletin reactions | 1.2 |
-| Cat interactions | 1.2 |
+| NPC conversation lines | 0.9 |
+| NPC closing lines | 0.85 |
+| Bulletin posts | 1.1 |
+| Bulletin reactions | 1.0 |
+| Cat interactions | 1.0 |
 | End-screen report | 0.7 |
 
 DeepSeek supports temperatures up to 2.0. Do not route high-temperature calls through

@@ -762,7 +762,7 @@ export default function AgentVerse() {
       ? "\n\n【本次对话的社交锚点】" + topPost.author.name + "刚在广场动态上发了：「" + topPost.content + "」。把这条动态当作开场或谈资织进对话——可以评论、八卦、追问、借此换话题、或主动提到" + topPost.author.name + "。这能让对话有共同话题，不要每次都只谈自己的兴趣。"
       : "";
     fetchWithRetry({
-      model: "deepseek-v4-flash", temperature: 1.1,
+      model: "deepseek-v4-flash", temperature: 0.9,
       messages: [
         { role: "system", content: "你扮演" + npc.name + "。你正在和" + player.name + "说话。你只能生成" + npc.name + "的台词，绝对不能生成" + player.name + "的台词。根据性格指导说话：\n" + dynamicsPrompt + "\n\n每条消息25-40字，口语化中文，语气贴合当前开场方式。\n\n【社交编织规则】这是一个有共同社交圈的小广场。如果系统提供了「社交锚点」（最近的动态）或「社交背景」（认识的人、自己发过的帖），请把它当成对话的一部分——评论、八卦、接话、追问都很自然。避免每次都只聊自己的兴趣，让对话有共同话题感。\n\n必须输出且仅输出JSON（不要任何其他文字）:\n" + jsonFmt },
         { role: "user", content: isOpening ? (desc(npc) + awareness + hook + "\n\n你是" + npc.name + "，生成对" + player.name + "的开场白，并提供三种" + player.name + "可能的回应建议。") : (desc(npc) + awareness + hook + "\n\n对话历史:\n" + histStr + "\n\n你是" + npc.name + "，生成你的回复，并提供三种" + player.name + "可能的回应建议（包括一个出人意料的wild选项）。") }
@@ -778,7 +778,7 @@ export default function AgentVerse() {
     var histStr = exchanges.map(function(e) { return e.speaker + ": " + e.text; }).join("\n");
     var awareness = getAwarenessContext(npc);
     fetchWithRetry({
-      model: "deepseek-v4-flash", temperature: 1.0,
+      model: "deepseek-v4-flash", temperature: 0.85,
       messages: [
         { role: "system", content: "你扮演" + npc.name + "。你正在和" + player.name + "结束这段对话。你只能生成" + npc.name + "的台词，不能生成" + player.name + "的台词。根据性格指导：\n" + dynamicsPrompt + "\n\n仅输出JSON: {\"line\": \"<" + npc.name + "的25-40字结语>\", \"affinity\": <0-100>, \"spark\": \"<8字以内>\"}" },
         { role: "user", content: "完整对话:\n" + histStr + awareness + "\n\n你是" + npc.name + "，生成你的结语并评估与" + player.name + "的缘分值。" }
@@ -927,7 +927,7 @@ export default function AgentVerse() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "deepseek-v4-flash",
-          temperature: 1.2,
+          temperature: 1.0,
           messages: [
             { role: "system", content: "生成一段广场流浪猫与路人的偶遇互动，共4条。严格按照指定说话人顺序，绝对不能搞混说话人。猫的台词只能是猫叫声或*动作描述*，不能说人话。人的台词要体现其个性，可以是语言或*动作描述*；若有近期社交背景，人的台词可以自然带入（比如顺嘴提到刚看到的动态、刚碰过的朋友），让场景更鲜活。输出纯JSON数组：[{\"speaker\":\"名字\",\"text\":\"内容\"},...]，不要其他文字。" },
             { role: "user", content: "猫：" + cat.name + "（广场神猫，高冷慵懒，偶尔亲人，只会喵叫和肢体动作）\n人：" + human.name + "（" + human.mbti + "，" + human.zodiac + "，" + human.bio.slice(0, 30) + "）" + getAwarenessContext(human) + "\n\n严格按此顺序生成4条：\n1. " + cat.name + "\n2. " + human.name + "\n3. " + cat.name + "\n4. " + human.name }
@@ -1031,7 +1031,7 @@ export default function AgentVerse() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: "deepseek-v4-flash",
-        temperature: 1.3,
+        temperature: 1.1,
         messages: [
           { role: "system", content: systemContent },
           { role: "user", content: userContent }
@@ -1069,7 +1069,7 @@ export default function AgentVerse() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "deepseek-v4-flash",
-          temperature: 1.2,
+          temperature: 1.0,
           messages: [
             { role: "system", content: "你在扮演一个广场居民，对社交网络上的帖子发表评论（10-20字）。评论风格要多样：可以赞同、反驳、开玩笑、追问、扯到自己的兴趣上、或完全跑题。如果「你认识的人」里提到了发帖人或被提及的人，可以带一点熟人之间的语气。语气贴合角色性格，不要总是附和。输出纯JSON：{\"reaction\":\"内容\"}" },
             { role: "user", content: reactor.name + "（" + reactor.mbti + "，" + reactor.zodiac + "，兴趣：" + reactor.interests.join("、") + "）" + getAwarenessContext(reactor) + "\n\n" + post.author.name + "发帖：「" + post.content + "」\n以" + reactor.name + "的口吻评论。" }
