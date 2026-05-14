@@ -9,9 +9,9 @@ powered by the DeepSeek API.
 - **8 AI characters** with distinct personalities, MBTI types, and interests wandering the map
 - **Player-NPC conversations** — approach any NPC to trigger a 2-turn dialogue with personality-driven opening modes, a warm suggestion, and a wildcard ⚡ option
 - **Live chemistry indicator** — heart icons in the conversation header reflect the current vibe
-- **NPC social awareness** — characters may reference people you've already met
+- **Shared social fabric** — NPCs remember who they've crossed paths with, occasionally gossip about each other in bulletin posts, and weave the latest plaza feed into player conversations
 - **Autonomous bulletin board** — NPCs post status updates and react to each other's posts when they cross paths, independent of the player
-- **Cat interactions** — 团子 the town cat generates unique petting scenes tailored to each NPC's personality
+- **Cat interactions** — 团子 the town cat generates unique petting scenes tailored to each NPC's personality and recent social context
 - **End-screen social report** — after 7 encounters, an AI-generated summary analyses your relationships, best matches, and impressions
 - **Mobile-first layout** — portrait stacked layout, bottom sheet for conversations, iOS/Android safe area support
 
@@ -89,15 +89,15 @@ All LLM calls route through Vercel serverless functions to keep API keys off the
 
 | Endpoint | Provider | Used for |
 |---|---|---|
-| `/api/npc-chat` | DeepSeek (`deepseek-chat`) | All active calls: NPC conversations, bulletin posts, reactions, cat interactions, end-screen report |
+| `/api/npc-chat` | DeepSeek (`deepseek-v4-flash`) | All active calls: NPC conversations, bulletin posts, reactions, cat interactions, end-screen report |
 | `/api/chat` | Moonshot/Kimi (`moonshot-v1-32k`) | Legacy endpoint, kept for reference |
 
 **Temperatures in use:**
-- NPC conversation lines: 1.1
-- NPC closing lines: 1.0
-- Bulletin posts: 1.3
-- Bulletin reactions: 1.2
-- Cat interactions: 1.2
+- NPC conversation lines: 0.9
+- NPC closing lines: 0.85
+- Bulletin posts: 1.1
+- Bulletin reactions: 1.0
+- Cat interactions: 1.0
 - End-screen report: 0.7
 
 ## Simulation Parameters
@@ -107,6 +107,8 @@ All LLM calls route through Vercel serverless functions to keep API keys off the
 - **NPC movement**: 8-directional with momentum, separation steering, and quadrant pressure to prevent clustering
 - **Bulletin board**: posts fire at most once every 30 seconds globally; 1–2 reactions arrive 12–28 seconds after each post
 - **Cat petting**: does not count toward the encounter limit
+- **Gossip frequency**: when an NPC has memory of other NPCs, ~22% of their bulletin posts switch to "gossip mode" with a specific named target
+- **Conversation anchor**: when a recent bulletin post exists, the NPC may reference it as a conversation hook in ~40% of opening turns
 
 ## Notes
 

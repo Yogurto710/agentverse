@@ -20,7 +20,7 @@ GitHub repo: https://github.com/Yogurto710/agentverse
 | All logic | `src/App.jsx` (single large file) |
 | Personality engine | `src/personality.js` |
 | LLM proxy | Vercel serverless functions (`api/npc-chat.js`) |
-| LLM provider | DeepSeek (`deepseek-chat` model) via `/api/npc-chat` |
+| LLM provider | DeepSeek (`deepseek-v4-flash` model) via `/api/npc-chat` |
 | Hosting | Vercel |
 | Env var | `DEEPSEEK_API_KEY` |
 
@@ -99,8 +99,12 @@ zodiac, and gender on the intro screen.
 | Cat interactions | 1.0 |
 | End-screen report | 0.7 |
 
-DeepSeek supports temperatures up to 2.0. Do not route high-temperature calls through
-the legacy Moonshot proxy — it caps at 1.0 and will throw an API error.
+DeepSeek's `deepseek-v4-flash` supports temperatures up to 2.0 and replaces the
+deprecated `deepseek-chat` name. Do not route high-temperature calls through the
+legacy Moonshot proxy — it caps at 1.0 and will throw an API error.
+
+Temperatures were lowered from the original "exuberant" pass (e.g. posts 1.3,
+conv 1.1) after live testing showed outputs were too disjointed/creative.
 
 ---
 
@@ -117,6 +121,12 @@ convLog      // completed conversations (shown in Records tab)
 // Refs
 agR          // mutable ref to agents array (used in game loop)
 lastNpcPostR // timestamp of last NPC bulletin post (global 30s cooldown)
+bulletinR    // mirror of `bulletin` state, kept in sync via useEffect — used
+             // inside async fetch callbacks to avoid stale closures
+
+// Per-NPC memory fields (initialized in initAgents)
+_metNpcs     // { [otherId]: { count, lastTs } } — NPC-to-NPC encounter map
+_lastPost    // { content, ts } — this NPC's most recent bulletin post
 ```
 
 `panelTab` auto-switches: "conv" when `activeConv` is set, "log" when it clears.
@@ -172,6 +182,50 @@ completely off-topic. Includes reactor's interests in the prompt.
 
 Each bulletin post shows: element icon, author name, MBTI badge, timestamp (`timeAgo`),
 post content. Reactions expand below as a threaded list.
+
+---
+
+## Shared Awareness System
+
+A lightweight context-injection layer that gives every LLM call a small window
+into the NPC's social world. Built to address the "every call is a cold start"
+problem and the "NPCs only ever monologue about their own interests" symptom.
+
+### Data model
+
+- `_metNpcs[otherId] = { count, lastTs }` — tracks NPC-to-NPC encounters. Logged
+  in `logEncounter()` whenever a bulletin post fires (poster ↔ proximity partner)
+  or a reaction fires (reactor ↔ original poster).
+- `_lastPost = { content, ts }` — the NPC's most recent bulletin post content.
+- `bulletinR.current` — recent global feed, surfaced as shared context.
+
+### `getAwarenessContext(npc)` helper
+
+Returns a compact block injected into every LLM call (cat, bulletin posts,
+reactions, player-NPC conversations). Three possible lines:
+- *你最近发过：「{lastPost}」*
+- *你认识的人：{name1}（刚刚/之前碰过N次）、{name2}…*
+- *广场最近的动态：{author}刚发过「...」*
+
+Data-only — directives live at the call site, not in the helper.
+
+### `pickPostMode(poster)` — gossip bias
+
+Pre-picks a bulletin post's style mode in JS instead of leaving it to the LLM.
+When the poster has `_metNpcs` entries, **22% of posts switch to "gossip" mode**
+with a specific named target injected into the prompt. Otherwise rolls one of
+the six standard modes (吐槽日常, 分享兴趣冷知识, etc.). The 22% knob is the
+single dial for tuning gossip frequency in posts.
+
+### Conversation anchor (`fetchNpcLine`)
+
+When the bulletin has a non-self post, **~40% of opening turns** include a soft
+hook surfacing the latest post as conversation material. The hook is suggestive
+("如果合适，可以顺嘴提一句; 不合适就忽略"), not prescriptive. Continuation
+turns skip the hook to avoid every reply becoming gossip. This is the structural
+fix for "disjointed conversations" — the bulletin board becomes the shared
+topical surface NPCs converge on, since they otherwise have no overlapping
+interests.
 
 ---
 
@@ -284,14 +338,31 @@ previous bug where the LLM confused cat/human speakers.
 Replaced `height: "100%"` with `flex: 1, minHeight: 0` on all three panels. This
 resolves the cropping bug where conversation content was cut off on mobile as text grew.
 
+### Shared awareness context across all LLM calls
+Added `_metNpcs` encounter map and `_lastPost` to each NPC, a `getAwarenessContext()`
+helper, and a `logEncounter()` recorder. Awareness is injected into all four LLM
+surfaces (cat, posts, reactions, player conversations) so NPCs can reference each
+other and the bulletin feed instead of every call being a cold start.
+
+### Gossip mode in bulletin posts
+`pickPostMode()` now decides the post style in JS. When the poster has memory of
+other NPCs, 22% of posts switch to "gossip" mode targeting a specific known NPC
+by name. Other posts may still weave social context where relevant.
+
+### Bulletin board as conversation anchor
+Player-NPC conversations now occasionally (~40% of opening turns) surface the
+latest bulletin post as a soft conversation hook, giving NPCs a shared topical
+surface to converge on. Addresses the "parallel monologues" problem caused by
+NPCs having narrow, non-overlapping interests.
+
+### DeepSeek model swap + temperature recalibration
+Migrated from deprecated `deepseek-chat` to `deepseek-v4-flash`. Temperatures
+across all five non-report call sites were lowered ~0.2 after live testing showed
+the prior settings produced too-creative/disjointed outputs.
+
 ---
 
 ## Known Gaps / Ideas in Discussion
-
-- **NPC-to-NPC relationship memory** — NPCs currently have no memory of prior encounters
-  with each other. Each bulletin post/reaction is stateless. A lightweight `_metNpcs`
-  map per agent (encounter count + last post snippet) would let repeat-encounter pairs
-  develop visible dynamics (warmth, rivalry, inside jokes).
 
 - **Moonshot as fallback** — `api/chat.js` is kept but not wired as an actual fallback
   if DeepSeek fails.
@@ -300,5 +371,14 @@ resolves the cropping bug where conversation content was cut off on mobile as te
   re-enabled via a settings toggle.
 
 - **End-screen report depth** — the report currently works off conversation transcripts
-  only. If NPC relationship memory is added, the report could incorporate the full
-  social web, not just player encounters.
+  only. Could be extended to incorporate the NPC-to-NPC social graph (now that
+  `_metNpcs` exists) for richer relationship-web analysis, not just player encounters.
+
+- **Awareness sentiment** — `_metNpcs` tracks count + timestamp but not affinity.
+  Adding a per-pair sentiment score (incrementing on agreement, decrementing on
+  contradiction) would let NPCs develop rivalries and friendships visible in
+  gossip tone.
+
+- **DeepSeek v4-flash mode** — the new model supports both thinking and non-thinking
+  modes. Current calls use the default; if responses are slow or contain `<think>`
+  blocks, may need to explicitly set the mode parameter.
