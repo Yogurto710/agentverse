@@ -758,13 +758,15 @@ export default function AgentVerse() {
     var awareness = getAwarenessContext(npc);
     var feed = bulletinR.current || [];
     var topPost = feed.find(function(p) { return p.author && p.author.id !== npc.id; });
-    var hook = topPost
-      ? "\n\n【本次对话的社交锚点】" + topPost.author.name + "刚在广场动态上发了：「" + topPost.content + "」。把这条动态当作开场或谈资织进对话——可以评论、八卦、追问、借此换话题、或主动提到" + topPost.author.name + "。这能让对话有共同话题，不要每次都只谈自己的兴趣。"
+    // Only surface the bulletin-anchor hook ~40% of the time, and only on the opening turn,
+    // so most conversations follow personality first and the feed is an occasional flavor.
+    var hook = (topPost && isOpening && Math.random() < 0.4)
+      ? "\n\n（顺带提一下，" + topPost.author.name + "刚在广场动态上发了：「" + topPost.content + "」。如果话题自然能接上，可以顺嘴提一句；不合适就忽略。）"
       : "";
     fetchWithRetry({
       model: "deepseek-v4-flash", temperature: 0.9,
       messages: [
-        { role: "system", content: "你扮演" + npc.name + "。你正在和" + player.name + "说话。你只能生成" + npc.name + "的台词，绝对不能生成" + player.name + "的台词。根据性格指导说话：\n" + dynamicsPrompt + "\n\n每条消息25-40字，口语化中文，语气贴合当前开场方式。\n\n【社交编织规则】这是一个有共同社交圈的小广场。如果系统提供了「社交锚点」（最近的动态）或「社交背景」（认识的人、自己发过的帖），请把它当成对话的一部分——评论、八卦、接话、追问都很自然。避免每次都只聊自己的兴趣，让对话有共同话题感。\n\n必须输出且仅输出JSON（不要任何其他文字）:\n" + jsonFmt },
+        { role: "system", content: "你扮演" + npc.name + "。你正在和" + player.name + "说话。你只能生成" + npc.name + "的台词，绝对不能生成" + player.name + "的台词。根据性格指导说话：\n" + dynamicsPrompt + "\n\n每条消息25-40字，口语化中文，语气贴合当前开场方式。\n\n首先要忠于自己的性格和兴趣。如果系统提供了社交背景（认识的人、最近的动态），那是可选的调味料——合适时可以自然带入一两句，不合适就别硬塞。不要让每次对话都变成八卦或评论别人。\n\n必须输出且仅输出JSON（不要任何其他文字）:\n" + jsonFmt },
         { role: "user", content: isOpening ? (desc(npc) + awareness + hook + "\n\n你是" + npc.name + "，生成对" + player.name + "的开场白，并提供三种" + player.name + "可能的回应建议。") : (desc(npc) + awareness + hook + "\n\n对话历史:\n" + histStr + "\n\n你是" + npc.name + "，生成你的回复，并提供三种" + player.name + "可能的回应建议（包括一个出人意料的wild选项）。") }
       ]
     }, 1, function(d) {
@@ -891,7 +893,7 @@ export default function AgentVerse() {
   function pickPostMode(poster) {
     var STANDARD = ["吐槽日常", "分享兴趣冷知识", "发表争议性观点", "碎碎念", "讲一个冷笑话", "对某件事的真实感受"];
     var metIds = poster._metNpcs ? Object.keys(poster._metNpcs) : [];
-    if (metIds.length > 0 && Math.random() < 0.4) {
+    if (metIds.length > 0 && Math.random() < 0.22) {
       var pickId = metIds[Math.floor(Math.random() * metIds.length)];
       var target = (agR.current || []).find(function(a) { return String(a.id) === pickId; });
       if (target) {
