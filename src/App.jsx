@@ -282,7 +282,7 @@ function EndScreen({ conversations, mochiPets, personas, onRestart }) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "deepseek-chat",
+        model: "deepseek-v4-flash",
         temperature: 0.7,
         messages: [
           { role: "system", content: "你是社交体验叙事师。根据玩家与角色的真实对话内容，生成有感情、有细节的总结。不要提及MBTI代码或星座名称，用具体的言行细节来描述人物和关系。中文，语气自然真实。\n\n输出纯JSON：\n{\"title\":\"<15字，有意境的标题>\",\"bestMatch\":{\"names\":\"<两名字>\",\"reason\":\"<40字，基于实际互动描述为何合拍>\"},\"surprise\":{\"names\":\"<两名字>\",\"reason\":\"<40字，描述出人意料的化学反应>\"},\"loneliest\":{\"name\":\"<名字>\",\"reason\":\"<30字，用具体细节描述疏离感>\"},\"impressions\":[{\"name\":\"<角色名>\",\"impression\":\"<60字以内，第一人称，引用对话中具体说过的话或细节，写出这个人给你留下的真实印象>\"}],\"overall\":\"<70字以内，基于这次游历的真实感受，有温度，有细节>\"}" },
@@ -412,6 +412,9 @@ export default function AgentVerse() {
   var moR = useRef(0);
   var psR = useRef([]);
   var lastNpcPostR = useRef(0);
+  var bulletinR = useRef([]);
+
+  useEffect(function() { bulletinR.current = bulletin; }, [bulletin]);
 
   function buildPersonas(info) {
     var player = {
@@ -458,6 +461,8 @@ export default function AgentVerse() {
         stepsLeft: 10 + Math.floor(Math.random() * 25),
         lastTalk: 0, _frozen: false,
         _idlePhase: Math.random() * Math.PI * 2, // for micro-drift
+        _metNpcs: {},          // {otherId: {count, lastTs}} — NPC-to-NPC memory
+        _lastPost: null,       // {content, ts} — this NPC's most recent bulletin post
       });
     });
     agR.current = a;
@@ -750,11 +755,12 @@ export default function AgentVerse() {
     var isOpening = exchanges.length === 0;
     var histStr = exchanges.map(function(e) { return e.speaker + ": " + e.text; }).join("\n");
     var jsonFmt = "{\"line\": \"" + npc.name + "说的话（25-40字）\", \"warm\": \"" + player.name + "温暖积极的回应\", \"cold\": \"" + player.name + "冷淡保守的回应\", \"wild\": \"" + player.name + "出人意料的回应（搞笑/反问/岔话题/犀利观点）\", \"vibe\": <1-5，当前对话气场分>}";
+    var awareness = getAwarenessContext(npc);
     fetchWithRetry({
-      model: "deepseek-chat", temperature: 1.1,
+      model: "deepseek-v4-flash", temperature: 1.1,
       messages: [
-        { role: "system", content: "你扮演" + npc.name + "。你正在和" + player.name + "说话。你只能生成" + npc.name + "的台词，绝对不能生成" + player.name + "的台词。根据性格指导说话：\n" + dynamicsPrompt + "\n\n每条消息25-40字，口语化中文，语气贴合当前开场方式。\n必须输出且仅输出JSON（不要任何其他文字）:\n" + jsonFmt },
-        { role: "user", content: isOpening ? (desc(npc) + "\n\n你是" + npc.name + "，生成对" + player.name + "的开场白，并提供三种" + player.name + "可能的回应建议。") : ("对话历史:\n" + histStr + "\n\n你是" + npc.name + "，生成你的回复，并提供三种" + player.name + "可能的回应建议（包括一个出人意料的wild选项）。") }
+        { role: "system", content: "你扮演" + npc.name + "。你正在和" + player.name + "说话。你只能生成" + npc.name + "的台词，绝对不能生成" + player.name + "的台词。根据性格指导说话：\n" + dynamicsPrompt + "\n\n每条消息25-40字，口语化中文，语气贴合当前开场方式。如果「你最近的认知」里提到了认识的人或最近的动态，可以自然地八卦/提及，让对话有社交温度（但别每次都提）。\n必须输出且仅输出JSON（不要任何其他文字）:\n" + jsonFmt },
+        { role: "user", content: isOpening ? (desc(npc) + awareness + "\n\n你是" + npc.name + "，生成对" + player.name + "的开场白，并提供三种" + player.name + "可能的回应建议。") : (desc(npc) + awareness + "\n\n对话历史:\n" + histStr + "\n\n你是" + npc.name + "，生成你的回复，并提供三种" + player.name + "可能的回应建议（包括一个出人意料的wild选项）。") }
       ]
     }, 1, function(d) {
       var raw = d.choices[0].message.content;
@@ -765,11 +771,12 @@ export default function AgentVerse() {
 
   function fetchNpcClosing(npc, player, exchanges, dynamicsPrompt, callback) {
     var histStr = exchanges.map(function(e) { return e.speaker + ": " + e.text; }).join("\n");
+    var awareness = getAwarenessContext(npc);
     fetchWithRetry({
-      model: "deepseek-chat", temperature: 1.0,
+      model: "deepseek-v4-flash", temperature: 1.0,
       messages: [
         { role: "system", content: "你扮演" + npc.name + "。你正在和" + player.name + "结束这段对话。你只能生成" + npc.name + "的台词，不能生成" + player.name + "的台词。根据性格指导：\n" + dynamicsPrompt + "\n\n仅输出JSON: {\"line\": \"<" + npc.name + "的25-40字结语>\", \"affinity\": <0-100>, \"spark\": \"<8字以内>\"}" },
-        { role: "user", content: "完整对话:\n" + histStr + "\n\n你是" + npc.name + "，生成你的结语并评估与" + player.name + "的缘分值。" }
+        { role: "user", content: "完整对话:\n" + histStr + awareness + "\n\n你是" + npc.name + "，生成你的结语并评估与" + player.name + "的缘分值。" }
       ]
     }, 1, function(d) {
       var raw = d.choices[0].message.content;
@@ -825,6 +832,56 @@ export default function AgentVerse() {
     }
   }
 
+  // Records an encounter between two NPCs (called from bulletin post + reaction sites)
+  function logEncounter(n1, n2) {
+    if (!n1 || !n2 || n1.isUser || n2.isUser || n1.isCat || n2.isCat) return;
+    if (!n1._metNpcs) n1._metNpcs = {};
+    if (!n2._metNpcs) n2._metNpcs = {};
+    var now = Date.now();
+    var r1 = n1._metNpcs[n2.id] || { count: 0, lastTs: 0 };
+    var r2 = n2._metNpcs[n1.id] || { count: 0, lastTs: 0 };
+    n1._metNpcs[n2.id] = { count: r1.count + 1, lastTs: now };
+    n2._metNpcs[n1.id] = { count: r2.count + 1, lastTs: now };
+  }
+
+  // Builds a compact "what this NPC currently knows about the world" block.
+  // Injected into every LLM call so NPCs can reference their own posts, gossip
+  // about NPCs they've met, and riff on what's happening on the bulletin board.
+  function getAwarenessContext(npc) {
+    if (!npc || npc.isUser || npc.isCat) return "";
+    var lines = [];
+    var now = Date.now();
+
+    if (npc._lastPost && npc._lastPost.content) {
+      lines.push("你最近发过：「" + npc._lastPost.content + "」");
+    }
+
+    if (npc._metNpcs) {
+      var known = Object.keys(npc._metNpcs).map(function(idStr) {
+        var rec = npc._metNpcs[idStr];
+        var other = (agR.current || []).find(function(a) { return String(a.id) === idStr; });
+        if (!other) return null;
+        var fresh = (now - rec.lastTs) < 90000 ? "刚刚" : "之前";
+        return other.name + "（" + fresh + "碰过" + rec.count + "次）";
+      }).filter(Boolean);
+      if (known.length > 0) {
+        lines.push("你认识的人：" + known.join("、"));
+      }
+    }
+
+    var feed = bulletinR.current || [];
+    var recent = feed.filter(function(p) { return p.author && p.author.id !== npc.id; }).slice(0, 2);
+    if (recent.length > 0) {
+      var summary = recent.map(function(p) {
+        return p.author.name + "刚发过「" + p.content + "」";
+      }).join("；");
+      lines.push("广场最近的动态：" + summary);
+    }
+
+    if (lines.length === 0) return "";
+    return "\n\n你最近的认知（可在发言中自然提及，但不必每次都提）：\n" + lines.join("\n");
+  }
+
   function doConv(a1, a2) {
     var hasCat = a1.isCat || a2.isCat;
     convR.current = true;
@@ -850,11 +907,11 @@ export default function AgentVerse() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "deepseek-chat",
+          model: "deepseek-v4-flash",
           temperature: 1.2,
           messages: [
-            { role: "system", content: "生成一段广场流浪猫与路人的偶遇互动，共4条。严格按照指定说话人顺序，绝对不能搞混说话人。猫的台词只能是猫叫声或*动作描述*，不能说人话。人的台词要体现其个性，可以是语言或*动作描述*。输出纯JSON数组：[{\"speaker\":\"名字\",\"text\":\"内容\"},...]，不要其他文字。" },
-            { role: "user", content: "猫：" + cat.name + "（广场神猫，高冷慵懒，偶尔亲人，只会喵叫和肢体动作）\n人：" + human.name + "（" + human.mbti + "，" + human.zodiac + "，" + human.bio.slice(0, 30) + "）\n\n严格按此顺序生成4条：\n1. " + cat.name + "\n2. " + human.name + "\n3. " + cat.name + "\n4. " + human.name }
+            { role: "system", content: "生成一段广场流浪猫与路人的偶遇互动，共4条。严格按照指定说话人顺序，绝对不能搞混说话人。猫的台词只能是猫叫声或*动作描述*，不能说人话。人的台词要体现其个性，可以是语言或*动作描述*；若有近期社交背景，人的台词可以自然带入（比如顺嘴提到刚看到的动态、刚碰过的朋友），让场景更鲜活。输出纯JSON数组：[{\"speaker\":\"名字\",\"text\":\"内容\"},...]，不要其他文字。" },
+            { role: "user", content: "猫：" + cat.name + "（广场神猫，高冷慵懒，偶尔亲人，只会喵叫和肢体动作）\n人：" + human.name + "（" + human.mbti + "，" + human.zodiac + "，" + human.bio.slice(0, 30) + "）" + getAwarenessContext(human) + "\n\n严格按此顺序生成4条：\n1. " + cat.name + "\n2. " + human.name + "\n3. " + cat.name + "\n4. " + human.name }
           ]
         })
       })
@@ -941,11 +998,11 @@ export default function AgentVerse() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "deepseek-chat",
+        model: "deepseek-v4-flash",
         temperature: 1.3,
         messages: [
-          { role: "system", content: "你在扮演一个有鲜明个性的广场居民，在社交网络上发帖。每次发帖风格要不同，从以下随机选一种：吐槽日常、分享兴趣冷知识、发表争议性观点、碎碎念、讲一个冷笑话、对某件事的真实感受、偶遇感想（仅偶尔用）。语气完全贴合角色性格，口语化，不要开头说「我」，不要用「作为XX」句式。输出纯JSON：{\"post\":\"内容（25-45字）\"}" },
-          { role: "user", content: poster.name + "（" + poster.mbti + "，" + poster.zodiac + "）\n简介：" + poster.bio + "\n兴趣：" + poster.interests.join("、") + "\n\n刚在广场碰到了" + other.name + "。以" + poster.name + "的口吻发一条动态。" }
+          { role: "system", content: "你在扮演一个有鲜明个性的广场居民，在社交网络上发帖。每次发帖风格要不同，从以下随机选一种：吐槽日常、分享兴趣冷知识、发表争议性观点、碎碎念、讲一个冷笑话、对某件事的真实感受、偶遇感想（仅偶尔用）、八卦/点评认识的人（基于「你认识的人」中的记录，可以亲切吐槽、好奇、或反差吐槽）。语气完全贴合角色性格，口语化，不要开头说「我」，不要用「作为XX」句式。输出纯JSON：{\"post\":\"内容（25-45字）\"}" },
+          { role: "user", content: poster.name + "（" + poster.mbti + "，" + poster.zodiac + "）\n简介：" + poster.bio + "\n兴趣：" + poster.interests.join("、") + getAwarenessContext(poster) + "\n\n刚在广场碰到了" + other.name + "。以" + poster.name + "的口吻发一条动态。" }
         ]
       })
     })
@@ -959,6 +1016,8 @@ export default function AgentVerse() {
       } catch(e) { content = null; }
       if (!content) content = "今天广场上遇到了有趣的人。";
       var post = { id: Date.now(), author: poster, content: content, reactions: [] };
+      poster._lastPost = { content: content, ts: Date.now() };
+      logEncounter(poster, other);
       setBulletin(function(prev) { return [post].concat(prev); });
       // Schedule 1–2 reactions from random other NPCs
       var pool = agR.current.filter(function(a) { return !a.isUser && !a.isCat && a.id !== poster.id && a.id !== other.id; });
@@ -977,11 +1036,11 @@ export default function AgentVerse() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "deepseek-chat",
+          model: "deepseek-v4-flash",
           temperature: 1.2,
           messages: [
-            { role: "system", content: "你在扮演一个广场居民，对社交网络上的帖子发表评论（10-20字）。评论风格要多样：可以赞同、反驳、开玩笑、追问、扯到自己的兴趣上、或完全跑题。语气贴合角色性格，不要总是附和。输出纯JSON：{\"reaction\":\"内容\"}" },
-            { role: "user", content: reactor.name + "（" + reactor.mbti + "，" + reactor.zodiac + "，兴趣：" + reactor.interests.join("、") + "）\n\n" + post.author.name + "发帖：「" + post.content + "」\n以" + reactor.name + "的口吻评论。" }
+            { role: "system", content: "你在扮演一个广场居民，对社交网络上的帖子发表评论（10-20字）。评论风格要多样：可以赞同、反驳、开玩笑、追问、扯到自己的兴趣上、或完全跑题。如果「你认识的人」里提到了发帖人或被提及的人，可以带一点熟人之间的语气。语气贴合角色性格，不要总是附和。输出纯JSON：{\"reaction\":\"内容\"}" },
+            { role: "user", content: reactor.name + "（" + reactor.mbti + "，" + reactor.zodiac + "，兴趣：" + reactor.interests.join("、") + "）" + getAwarenessContext(reactor) + "\n\n" + post.author.name + "发帖：「" + post.content + "」\n以" + reactor.name + "的口吻评论。" }
           ]
         })
       })
@@ -994,6 +1053,7 @@ export default function AgentVerse() {
           text = JSON.parse(cleaned).reaction;
         } catch(e) { text = null; }
         if (!text) text = "有意思！";
+        logEncounter(reactor, post.author);
         setBulletin(function(prev2) {
           return prev2.map(function(p) {
             if (p.id !== postId) return p;
